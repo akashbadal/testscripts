@@ -1,0 +1,32 @@
+# Add to the Streamlit app for more functionality
+
+# Temperature slider
+temperature = st.sidebar.slider("Temperature", 0.0, 1.0, 0.7)
+
+# Response length slider
+max_length = st.sidebar.slider("Max Response Length", 100, 1000, 500)
+
+# Add system prompt input
+system_prompt = st.sidebar.text_area(
+    "System Prompt",
+    "You are a helpful AI assistant."
+)
+
+# Modified response function
+def get_llama_response(prompt, temperature=0.7, max_length=500):
+    full_prompt = f"{system_prompt}\n\nUser: {prompt}\nAssistant:"
+    
+    response = runtime.invoke_endpoint(
+        EndpointName='llama-endpoint',
+        ContentType='application/json',
+        Body=json.dumps({
+            'inputs': full_prompt,
+            'parameters': {
+                'max_length': max_length,
+                'temperature': temperature,
+                'top_p': 0.95,
+                'do_sample': True
+            }
+        })
+    )
+    # ... rest of the function
