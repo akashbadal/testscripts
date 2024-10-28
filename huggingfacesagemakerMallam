@@ -1,0 +1,68 @@
+import streamlit as st
+import boto3
+import json
+
+# Initialize SageMaker runtime client
+runtime = boto3.client('sagemaker-runtime')
+
+def get_llama_response(prompt):
+    """
+    Get response from SageMaker endpoint
+    """
+    try:
+        response = runtime.invoke_endpoint(
+            EndpointName='llama-endpoint',
+            ContentType='application/json',
+            Body=json.dumps({
+                'inputs': prompt,
+                'parameters': {
+                    'max_length': 500,
+                    'temperature': 0.7,
+                    'top_p': 0.95,
+                    'do_sample': True
+                }
+            })
+        )
+        
+        result = json.loads(response['Body'].read().decode())
+        return result[0]['generated_text']
+    
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+# Streamlit UI
+st.title("🦙 Llama Q&A Bot")
+
+# Initialize chat history
+if 'messages' not in st.session_state:
+    st.session_state.messages = []
+
+# Display chat history
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# Chat input
+if prompt := st.chat_input("Ask your question:"):
+    # Display user message
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    
+    # Add user message to history
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    # Get bot response
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            response = get_llama_response(prompt)
+            st.markdown(response)
+    
+    # Add assistant response to history
+    st.session_state.messages.append({"role": "assistant", "content": response})
+
+# Add sidebar with options
+with st.sidebar:
+    st.title("Settings")
+    st.write("Model: Llama-2")
+    if st.button("Clear Chat"):
+        st.session_state.messages = []
