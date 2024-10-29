@@ -1,32 +1,146 @@
-# Add to the Streamlit app for more functionality
+import streamlit as st
+import boto3
+import json
+from transformers import AutoTokenizer
 
-# Temperature slider
-temperature = st.sidebar.slider("Temperature", 0.0, 1.0, 0.7)
+# Initialize tokenizer specifically for MaLLaM
+tokenizer = AutoTokenizer.from_pretrained("mesolitica/mallam-1.1B-4096")
 
-# Response length slider
-max_length = st.sidebar.slider("Max Response Length", 100, 1000, 500)
+# Initialize SageMaker runtime client
+runtime = boto3.client('sagemaker-runtime')
 
-# Add system prompt input
-system_prompt = st.sidebar.text_area(
-    "System Prompt",
-    "You are a helpful AI assistant."
-)
+def format_prompt(message, system_prompt="You are a helpful AI assistant."):
+    """
+    Format prompt for MaLLaM - using standard prompt format
+    """
+    # MaLLaM uses simple text format
+    formatted_prompt = f"{system_prompt}\n\nUser: {message}\nAssistant:"
+    return formatted_prompt
 
-# Modified response function
-def get_llama_response(prompt, temperature=0.7, max_length=500):
-    full_prompt = f"{system_prompt}\n\nUser: {prompt}\nAssistant:"
-    
-    response = runtime.invoke_endpoint(
-        EndpointName='llama-endpoint',
-        ContentType='application/json',
-        Body=json.dumps({
-            'inputs': full_prompt,
+def get_mallam_response(prompt, temperature=0.7, max_length=500):
+    """
+    Get response from MaLLaM endpoint
+    """
+    try:
+        # Format the prompt
+        formatted_prompt = format_prompt(prompt)
+        
+        # Prepare the payload
+        payload = {
+            'inputs': formatted_prompt,
             'parameters': {
-                'max_length': max_length,
+                'max_new_tokens': max_length,
                 'temperature': temperature,
-                'top_p': 0.95,
-                'do_sample': True
+                'top_p': 0.9,
+                'do_sample': True,
+                'pad_token_id': tokenizer.eos_token_id,
+                'eos_token_id': tokenizer.eos_token_id
             }
-        })
+        }
+
+        # Debug information
+        if st.sidebar.checkbox("Show Debug Info"):
+            st.sidebar.write("Formatted Prompt:")
+            st.sidebar.code(formatted_prompt)
+            tokens = tokenizer.encode(formatted_prompt)
+            st.sidebar.write(f"Number of tokens: {len(tokens)}")
+
+        # Call SageMaker endpoint
+        response = runtime.invoke_endpoint(
+            EndpointName='mallam-endpoint',
+            ContentType='application/json',
+            Body=json.dumps(payload)
+        )
+        
+        # Parse response
+        response_body = json.loads(response['Body'].read().decode())
+        generated_text = response_body[0]['generated_text']
+        
+        # Clean up response - remove the prompt from the response
+        response_only = generated_text[len(formatted_prompt):].strip()
+        
+        return response_only
+    
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        return f"Error generating response: {str(e)}"
+
+# Streamlit UI
+st.title("🇲🇾 MaLLaM - Malaysian Language Model")
+st.markdown("A 1.1B parameter Malaysian language model that supports both Bahasa Malaysia and English")
+
+# Initialize chat history
+if 'messages' not in st.session_state:
+    st.session_state.messages = []
+
+# Sidebar settings
+with st.sidebar:
+    st.title("Model Settings")
+    language = st.selectbox(
+        "Select Language",
+        ["English", "Bahasa Malaysia"]
     )
-    # ... rest of the function
+    
+    temperature = st.slider("Temperature", 0.1, 1.0, 0.7)
+    max_length = st.slider("Max Response Length", 100, 2000, 500)
+    
+    system_prompt = st.text_area(
+        "System Prompt",
+        "You are a helpful AI assistant that can communicate in both English and Bahasa Malaysia."
+    )
+
+# Display chat history
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# Chat input
+if prompt := st.chat_input("Ask your question (in English or Bahasa Malaysia):"):
+    # Display user message
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    
+    # Add user message to history
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    # Get bot response
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            response = get_mallam_response(
+                prompt,
+                temperature=temperature,
+                max_length=max_length
+            )
+            st.markdown(response)
+    
+    # Add assistant response to history
+    st.session_state.messages.append({"role": "assistant", "content": response})
+
+# Token counter
+def count_tokens(text):
+    return len(tokenizer.encode(text))
+
+# Display token usage in sidebar
+if st.sidebar.checkbox("Show Token Usage"):
+    total_tokens = 0
+    st.sidebar.write("Token Usage:")
+    for message in st.session_state.messages:
+        tokens = count_tokens(message["content"])
+        total_tokens += tokens
+        st.sidebar.write(f"{message['role']}: {tokens} tokens")
+    st.sidebar.write(f"Total tokens: {total_tokens}")
+
+# Test functionality
+if st.sidebar.button("Test Model"):
+    test_prompts = {
+        "English": "What is the capital of Malaysia?",
+        "Bahasa Malaysia": "Apakah ibu negara Malaysia?"
+    }
+    test_prompt = test_prompts[language]
+    st.sidebar.write(f"Testing with: {test_prompt}")
+    response = get_mallam_response(test_prompt)
+    st.sidebar.write("Response:", response)
+
+# Clear chat button
+if st.sidebar.button("Clear Chat"):
+    st.session_state.messages = []
