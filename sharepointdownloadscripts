@@ -1,0 +1,50 @@
+import requests
+import base64
+from urllib.parse import urljoin
+import boto3
+import os
+
+def lambda_handler(event, context):
+    # SharePoint configuration
+    sharepoint_site = os.environ['SHAREPOINT_SITE']
+    sharepoint_username = os.environ['SHAREPOINT_USERNAME']
+    sharepoint_password = os.environ['SHAREPOINT_PASSWORD']
+    relative_file_path = event.get('file_path', '')
+    s3_bucket = event.get('s3_bucket', '')
+    s3_key = event.get('s3_key', '')
+
+    try:
+        # Create basic auth header
+        auth_string = f"{sharepoint_username}:{sharepoint_password}"
+        auth_bytes = auth_string.encode('ascii')
+        base64_auth = base64.b64encode(auth_bytes).decode('ascii')
+        headers = {
+            'Authorization': f'Basic {base64_auth}',
+            'Accept': 'application/json;odata=verbose'
+        }
+
+        # Construct file URL
+        file_url = urljoin(sharepoint_site, f"/_api/web/GetFileByServerRelativeUrl('{relative_file_path}')/$value")
+
+        # Download file from SharePoint
+        response = requests.get(file_url, headers=headers, stream=True)
+        response.raise_for_status()
+
+        # Upload to S3
+        s3_client = boto3.client('s3')
+        s3_client.put_object(
+            Bucket=s3_bucket,
+            Key=s3_key,
+            Body=response.content
+        )
+
+        return {
+            'statusCode': 200,
+            'body': f'Successfully downloaded file from SharePoint and uploaded to S3: {s3_bucket}/{s3_key}'
+        }
+
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'body': f'Error: {str(e)}'
+        }
