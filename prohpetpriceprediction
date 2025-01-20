@@ -1,0 +1,130 @@
+import pandas as pd
+import numpy as np
+from prophet import Prophet
+import matplotlib.pyplot as plt
+from datetime import datetime
+import seaborn as sns
+
+def prepare_data_for_prophet(df):
+    """
+    Prepare the data in the format required by Prophet
+    Prophet requires columns named 'ds' (datetime) and 'y' (target variable)
+    """
+    # Make a copy to avoid modifying original data
+    prophet_df = df.copy()
+    
+    # Rename columns to Prophet requirements
+    prophet_df.columns = ['ds', 'y']
+    
+    # Ensure datetime format
+    prophet_df['ds'] = pd.to_datetime(prophet_df['ds'])
+    
+    return prophet_df
+
+def build_prophet_model(df, future_days=30):
+    """
+    Build and train Prophet model, make predictions
+    
+    Parameters:
+    df: DataFrame with 'ds' and 'y' columns
+    future_days: Number of days to forecast into the future
+    
+    Returns:
+    model: Trained Prophet model
+    forecast: DataFrame with predictions
+    """
+    # Initialize model
+    model = Prophet(
+        yearly_seasonality=True,
+        weekly_seasonality=True,
+        daily_seasonality=True,
+        changepoint_prior_scale=0.05,  # Flexibility of trend changes
+        seasonality_prior_scale=10,    # Flexibility of seasonality
+    )
+    
+    # Fit model
+    model.fit(df)
+    
+    # Create future dates for prediction
+    future_dates = model.make_future_dataframe(periods=future_days)
+    
+    # Make predictions
+    forecast = model.predict(future_dates)
+    
+    return model, forecast
+
+def plot_results(model, forecast, actual_data):
+    """
+    Create visualizations of the model results
+    """
+    # Plot 1: Prophet's built-in plot with trend and forecast
+    fig1 = model.plot(forecast)
+    plt.title('Copper Price Forecast with Trend')
+    
+    # Plot 2: Components (trend, yearly seasonality, weekly seasonality)
+    fig2 = model.plot_components(forecast)
+    
+    # Plot 3: Actual vs Predicted
+    plt.figure(figsize=(12, 6))
+    plt.plot(actual_data['ds'], actual_data['y'], label='Actual', color='blue')
+    plt.plot(forecast['ds'], forecast['yhat'], label='Predicted', color='red')
+    plt.fill_between(forecast['ds'], 
+                     forecast['yhat_lower'], 
+                     forecast['yhat_upper'], 
+                     color='red', 
+                     alpha=0.2)
+    plt.title('Actual vs Predicted Copper Prices')
+    plt.xlabel('Date')
+    plt.ylabel('Price')
+    plt.legend()
+    
+    return fig1, fig2
+
+def evaluate_model(actual_data, forecast):
+    """
+    Calculate model performance metrics
+    """
+    # Merge actual and predicted values
+    evaluation_df = actual_data.merge(
+        forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']], 
+        on='ds', 
+        how='left'
+    )
+    
+    # Calculate metrics
+    mse = np.mean((evaluation_df['y'] - evaluation_df['yhat'])**2)
+    rmse = np.sqrt(mse)
+    mae = np.mean(abs(evaluation_df['y'] - evaluation_df['yhat']))
+    mape = np.mean(abs((evaluation_df['y'] - evaluation_df['yhat']) / evaluation_df['y'])) * 100
+    
+    return {
+        'MSE': mse,
+        'RMSE': rmse,
+        'MAE': mae,
+        'MAPE': mape
+    }
+
+# Example usage:
+if __name__ == "__main__":
+    # Sample data loading (replace with your actual data)
+    # data = pd.read_csv('copper_prices.csv')
+    
+    # For demonstration, creating sample data
+    dates = pd.date_range(start='2020-01-01', end='2023-12-31', freq='D')
+    prices = np.random.normal(9000, 1000, len(dates))  # Sample copper prices
+    data = pd.DataFrame({'date': dates, 'copper_price': prices})
+    
+    # Prepare data
+    prophet_df = prepare_data_for_prophet(data)
+    
+    # Build model and get forecast
+    model, forecast = build_prophet_model(prophet_df)
+    
+    # Plot results
+    fig1, fig2 = plot_results(model, forecast, prophet_df)
+    
+    # Evaluate model
+    metrics = evaluate_model(prophet_df, forecast)
+    print("\nModel Performance Metrics:")
+    for metric, value in metrics.items():
+        print(f"{metric}: {value:.2f}")
